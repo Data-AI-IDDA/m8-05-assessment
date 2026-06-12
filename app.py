@@ -1,65 +1,113 @@
 """
-Streamlit chat UI for the LLM chat micro-service.
+Streamlit chat UI — DataBuddy: DS/ML Study Assistant.
 
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
+Run with:
     streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
 """
 
 import streamlit as st
 
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="DataBuddy — DS Study Assistant", page_icon="🤖")
+st.title("🤖 DataBuddy — DS / ML Study Assistant")
+st.caption("Ask me anything from the Ironhack ML & AI curriculum.")
 
-# --- Sidebar control (Requirement: one small control) ----------------------
+# ---------------------------------------------------------------------------
+# Sidebar controls
+# ---------------------------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
-    temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
+    st.header("⚙️ Settings")
+
+    temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=1.5,
+        value=0.4,
+        step=0.1,
+        help="Lower = more focused answers. Higher = more creative/varied.",
+    )
+
+    mode = st.radio(
+        "Mode",
+        options=["💬 Chat", "🎯 Quiz me!"],
+        help="Quiz mode primes DataBuddy to ask you a question first.",
+    )
+
+    st.divider()
+
+    if st.button("🗑️ Clear chat", use_container_width=True):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
         st.rerun()
 
-# --- State -----------------------------------------------------------------
+    st.divider()
+    st.markdown("**Model:** `minimax-m3:cloud` via Ollama")
+    st.markdown("**Backend:** OpenAI-compatible local endpoint")
+
+# ---------------------------------------------------------------------------
+# Session state — one ChatService per session
+# ---------------------------------------------------------------------------
 if "service" not in st.session_state:
     st.session_state.service = ChatService(temperature=temperature)
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "mode_primed" not in st.session_state:
+    st.session_state.mode_primed = None
 
 service: ChatService = st.session_state.service
-service.temperature = temperature
+service.temperature = temperature  # live update from slider
 
-# --- Render history --------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Quiz-mode primer: inject a first assistant message asking a question
+# ---------------------------------------------------------------------------
+if mode == "🎯 Quiz me!" and st.session_state.mode_primed != "quiz":
+    st.session_state.messages = []
+    service.reset()
+    primer = (
+        "Great! I'll quiz you on DS/ML topics. Here's your first question:\n\n"
+        "**What is the difference between bias and variance in a machine learning "
+        "model, and how do they contribute to model error?**"
+    )
+    st.session_state.messages.append({"role": "assistant", "content": primer})
+    service.history.append({"role": "assistant", "content": primer})
+    st.session_state.mode_primed = "quiz"
+elif mode == "💬 Chat" and st.session_state.mode_primed != "chat":
+    st.session_state.messages = []
+    service.reset()
+    st.session_state.mode_primed = "chat"
+
+# ---------------------------------------------------------------------------
+# Render conversation history
+# ---------------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# ---------------------------------------------------------------------------
+# Handle a new user turn
+# ---------------------------------------------------------------------------
+placeholder = (
+    "Answer the question above…" if mode == "🎯 Quiz me!" else "Ask me anything DS/ML…"
+)
+
+if prompt := st.chat_input(placeholder):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
         reply = st.write_stream(service.stream(prompt))
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
+# ---------------------------------------------------------------------------
+# Token usage in sidebar
+# ---------------------------------------------------------------------------
 with st.sidebar:
+    st.divider()
+    st.caption("**Token usage (this session)**")
     st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
+        f"↑ In: {service.total_input_tokens:,}  |  "
+        f"↓ Out: {service.total_output_tokens:,}"
     )
