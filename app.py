@@ -15,10 +15,11 @@ Requirements this file should satisfy (see README):
 
 import streamlit as st
 
-from llm_service import ChatService
+from llm_service import ChatService, ConfigError
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="Study Buddy — Code Explainer", page_icon="💬")
+st.title("💬 Study Buddy — Python & ML Code Explainer")
+st.caption("Paste Python/ML code and I'll explain it. Ask follow-ups too.")
 
 # --- Sidebar control (Requirement: one small control) ----------------------
 with st.sidebar:
@@ -32,7 +33,11 @@ with st.sidebar:
 
 # --- State -----------------------------------------------------------------
 if "service" not in st.session_state:
-    st.session_state.service = ChatService(temperature=temperature)
+    try:
+        st.session_state.service = ChatService(temperature=temperature)
+    except ConfigError as exc:
+        st.error(str(exc))
+        st.stop()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
