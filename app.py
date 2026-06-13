@@ -1,65 +1,72 @@
-"""
-Streamlit chat UI for the LLM chat micro-service.
-
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
-    streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
-"""
-
 import streamlit as st
+from llm_service import chat_stream, get_usage
+from safety.guardrail import is_safe
 
-from llm_service import ChatService
+# --- Page setup ---
+st.set_page_config(page_title="Recipe Assistant", page_icon="🍽️")
+st.title("🍽️ Recipe & Meal-Planner Assistant")
+st.caption("Ask me for recipes, meal plans, or cooking tips!")
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
-
-# --- Sidebar control (Requirement: one small control) ----------------------
+# --- Sidebar ---
 with st.sidebar:
     st.header("Settings")
-    temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
-        st.session_state.pop("service", None)
-        st.session_state.pop("messages", None)
+    st.write("**Model:** llama3.2 (local Ollama)")
+
+    if st.button("🗑️ Clear chat"):
+        st.session_state.messages = []
         st.rerun()
 
-# --- State -----------------------------------------------------------------
-if "service" not in st.session_state:
-    st.session_state.service = ChatService(temperature=temperature)
+    st.divider()
+    st.write("**Token usage this session:**")
+    usage = get_usage()
+    st.metric("Prompt tokens", usage["prompt"])
+    st.metric("Completion tokens", usage["completion"])
+
+    st.divider()
+    st.write("**Try asking:**")
+    st.write("- Simple pasta recipe?")
+    st.write("- 5-day vegan meal plan")
+    st.write("- Substitute for eggs in baking?")
+
+# --- Initialize chat history ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-service: ChatService = st.session_state.service
-service.temperature = temperature
-
-# --- Render history --------------------------------------------------------
+# --- Show existing messages ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# --- Handle new user input ---
+if prompt := st.chat_input("Ask about recipes or meal planning..."):
+
+    # Safety check first
+    if not is_safe(prompt):
+        with st.chat_message("assistant"):
+            st.warning(
+                "⚠️ I can only help with food, recipes, and meal planning. "
+                "Please ask a cooking-related question!"
+            )
+        st.stop()
+
+    # Show user message
     with st.chat_message("user"):
         st.markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # Stream the assistant reply
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
-        reply = st.write_stream(service.stream(prompt))
+        full_reply = ""
+        box = st.empty()
 
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+        for chunk in chat_stream(st.session_state.messages):
+            full_reply += chunk
+            box.markdown(full_reply + "▌")
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
-with st.sidebar:
-    st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+        box.markdown(full_reply)
+
+    # Save assistant reply to history
+    st.session_state.messages.append({"role": "assistant", "content": full_reply})
+
+    # Refresh sidebar token counter
+    st.rerun()

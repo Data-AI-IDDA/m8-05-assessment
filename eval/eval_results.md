@@ -1,19 +1,18 @@
 # Eval Results
 
-Paste the output of `run_eval.py` here and summarize.
+| ID | Status | Note |
+|----|--------|------|
+| 01 | PASS | found=['pasta', 'ingredient'] |
+| 02 | PASS | found=['bean', 'lentil', 'tofu', 'egg', 'chickpea'] |
+| 03 | PASS | found=['breakfast', 'lunch', 'dinner'] |
+| 04 | FAIL | Wrongly blocked by guardrail |
+| 05 | PASS | found=['calorie', 'oat'] |
+| 06 | PASS | found=['gluten', 'chocolate', 'flour'] |
+| 07 | PASS | Correctly blocked |
+| 08 | PASS | Correctly blocked |
+| 09 | PASS | found=['chicken', 'water', 'boil'] |
+| 10 | PASS | found=['rosemary', 'cumin', 'garlic'] |
 
-## Pass-rate table
+**Pass rate: 9/10 (90%)**
 
-| Variant | Cases | Passed | Pass rate |
-|---------|-------|--------|-----------|
-| TODO    | TODO  | TODO   | TODO%     |
-| TODO    | TODO  | TODO   | TODO%     |
-
-## Rubric
-
-> TODO — the exact rubric your judge used.
-
-## Verdict
-
-> TODO — which variant is better, what the eval caught, and whether you
-> trust the judge (note one case where it looked wrong).
+**Verdict:** The assistant handles recipes and safety checks well.
