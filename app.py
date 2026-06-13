@@ -1,65 +1,81 @@
 """
-Streamlit chat UI for the LLM chat micro-service.
+Streamlit chat UI for the Support Triage micro-service.
 
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
+Run with:
     streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
 """
 
 import streamlit as st
 
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="Support Triage Assistant", page_icon="🎫")
+st.title("🎫 Support Triage Assistant")
+st.caption("Describe your issue and I'll classify and route it for you.")
 
-# --- Sidebar control (Requirement: one small control) ----------------------
+# ---------------------------------------------------------------------------
+# Sidebar controls
+# ---------------------------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
-    temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
+    st.header("⚙️ Settings")
+
+    temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.2,
+        step=0.1,
+        help="Lower = more consistent triage; higher = more varied phrasing.",
+    )
+
+    st.divider()
+
+    if st.button("🗑️ Clear chat", use_container_width=True):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
         st.rerun()
 
-# --- State -----------------------------------------------------------------
+    st.divider()
+    st.markdown("**Token usage (this session)**")
+    token_placeholder = st.empty()
+
+# ---------------------------------------------------------------------------
+# Session state — one ChatService instance persists across Streamlit reruns
+# ---------------------------------------------------------------------------
 if "service" not in st.session_state:
     st.session_state.service = ChatService(temperature=temperature)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 service: ChatService = st.session_state.service
-service.temperature = temperature
+service.temperature = temperature  # respect slider changes mid-session
 
-# --- Render history --------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Render existing conversation history
+# ---------------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# ---------------------------------------------------------------------------
+# Handle a new user turn
+# ---------------------------------------------------------------------------
+if prompt := st.chat_input("Describe your support issue…"):
+    # Show the user bubble immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Stream the assistant reply
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
         reply = st.write_stream(service.stream(prompt))
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
-with st.sidebar:
-    st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+# ---------------------------------------------------------------------------
+# Update token counter in sidebar (runs after every rerun)
+# ---------------------------------------------------------------------------
+token_placeholder.caption(
+    f"Input tokens: {service.total_input_tokens}\n\n"
+    f"Output tokens: {service.total_output_tokens}"
+)
