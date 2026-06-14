@@ -17,14 +17,14 @@ import streamlit as st
 
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="Python Debugging Tutor", page_icon="🐍")
+st.title("🐍 Python Debugging Tutor")
 
 # --- Sidebar control (Requirement: one small control) ----------------------
 with st.sidebar:
     st.header("Settings")
     temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
+    
     if st.button("Clear chat"):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
@@ -45,21 +45,26 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+if prompt := st.chat_input("Ask a Python debugging question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
-        reply = st.write_stream(service.stream(prompt))
+        try:
+            # Streaming: st.write_stream consumes a generator of text chunks.
+            reply = st.write_stream(service.stream(prompt))
+        except Exception as e:
+            reply = f"⚠️ Error: {str(e)}"
+            st.error(reply)
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
 # --- Cost visibility (Requirement: token usage tracked) --------------------
 with st.sidebar:
+    st.divider()
+    st.subheader("Token Usage")
     st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
+        f"Input: {service.total_input_tokens}\n\n"
+        f"Output: {service.total_output_tokens}"
     )
