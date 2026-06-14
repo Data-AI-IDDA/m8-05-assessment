@@ -1,16 +1,12 @@
-# Python
-__pycache__/
-*.py[cod]
-.ipynb_checkpoints/
-.venv/
-venv/
-env/
-
-# Secrets — never commit your key
+# Local environment variables containing sensitive keys
 .env
 
-# Streamlit
-.streamlit/secrets.toml
+# Python build and cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 
-# OS
-.DS_Store
+# Streamlit local configuration
+.streamlit/
