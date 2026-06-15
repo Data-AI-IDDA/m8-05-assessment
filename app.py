@@ -1,65 +1,78 @@
-"""
-Streamlit chat UI for the LLM chat micro-service.
-
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
-    streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
-"""
-
 import streamlit as st
-
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="StudyBot — AI Study Buddy", page_icon="🤖")
+st.title("🤖 StudyBot — AI Study Buddy")
+st.caption("Your study buddy for LLMs & applied AI — ask anything from the course.")
 
-# --- Sidebar control (Requirement: one small control) ----------------------
+# --- Sidebar controls -------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
+    st.header("⚙️ Settings")
+
     temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
+
+    model_choice = st.selectbox(
+        "Model",
+        options=["llama3.2", "llama3.1", "mistral"],
+        index=0,
+    )
+
+    quiz_mode = st.toggle("Quiz mode 🎓", value=False)
+
+    st.divider()
+
+    if st.button("🗑️ Clear chat", use_container_width=True):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
         st.rerun()
 
-# --- State -----------------------------------------------------------------
+# --- State ------------------------------------------------------------------
 if "service" not in st.session_state:
-    st.session_state.service = ChatService(temperature=temperature)
+    st.session_state.service = ChatService(model=model_choice, temperature=temperature)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 service: ChatService = st.session_state.service
 service.temperature = temperature
 
-# --- Render history --------------------------------------------------------
+# --- Render history ---------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# --- Welcome message if chat is empty ---------------------------------------
+if not st.session_state.messages:
+    with st.chat_message("assistant"):
+        st.markdown(
+            "👋 Hi! I'm **StudyBot**, your study buddy for this AI/LLM course.\n\n"
+            "I can help you with:\n"
+            "- 📖 Explaining concepts (prompting, RAG, evals, safety, fine-tuning…)\n"
+            "- 🧪 Quizzing you on course material\n"
+            "- 💡 Giving examples and analogies\n\n"
+            "What would you like to study today?"
+        )
+
+# --- Handle new user turn ---------------------------------------------------
+if prompt := st.chat_input("Ask me anything about AI & LLMs…"):
+    effective_prompt = (
+        prompt + "\n\n[After answering, ask me one short quiz question on this topic.]"
+        if quiz_mode
+        else prompt
+    )
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
-        reply = st.write_stream(service.stream(prompt))
+        reply = st.write_stream(service.stream(effective_prompt))
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
+# --- Token usage in sidebar -------------------------------------------------
 with st.sidebar:
+    st.divider()
     st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+        f"📊 Tokens — in: {service.total_input_tokens:,} / "
+        f"out: {service.total_output_tokens:,}"
+    ) 
