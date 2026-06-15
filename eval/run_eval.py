@@ -1,59 +1,237 @@
 """
-Run the eval over eval_cases.json and print a pass-rate table.
+Eval harness for CodeLens — AI Code Explainer.
 
-STARTER skeleton. Fill in the TODOs, then:
+Uses LLM-as-judge (gemini-3.1-flash-lite) to score each answer PASS/FAIL.
+Runs two variants:
+  - variant-A: temperature=0.2  (more deterministic)
+  - variant-B: temperature=0.7  (more creative)
 
+API-limit friendly design:
+  - Each case gets ONE ChatService.send() call (the answer)
+  - Each answer gets ONE judge call  -> 2 calls per case per variant
+  - Total API calls: 2 variants x 10 cases x 2 = 40 calls maximum
+  - RPM=15 -> 4s delay is safe (15 req/min = 1 req per 4s)
+  - judge uses max_output_tokens=64 (tiny, fast, cheap)
+
+Run:
     python eval/run_eval.py
-
-Approach: send each case's input through your ChatService, then score the
-output. LLM-as-judge is fine — give a judge model a clear rubric and ask for
-a pass/fail (or 1–5). Keep the test set FIXED so you can compare changes.
+    python eval/run_eval.py --variant A   # run only variant A (20 calls)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
+import time
 
-# Make the parent dir importable so we can reuse the backend.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
+load_dotenv()
+
 from llm_service import ChatService  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# ── Judge config ───────────────────────────────────────────────────────────────
+JUDGE_MODEL = "gemini-3.1-flash-lite"
+
+# RPM=15 -> 1 request every 4s to be safe
+DELAY_BETWEEN_CALLS = 4   # seconds between every API call (answer + judge)
+DELAY_BETWEEN_VARIANTS = 30  # seconds pause between variant A and B
+
+JUDGE_PROMPT_TEMPLATE = """\
+You are a strict but fair evaluator for an AI code-explanation assistant called CodeLens.
+
+## Task
+Decide whether the ACTUAL ANSWER satisfies the EXPECTED CRITERIA for the given INPUT.
+
+## Input
+{input}
+
+## Expected criteria
+{expected}
+
+## Actual answer
+{answer}
+
+## Scoring rules
+- Reply with exactly one word: PASS or FAIL
+- PASS  -> the answer clearly satisfies the criteria (even if worded differently)
+- FAIL  -> the answer ignores or violates the criteria
+- Do not add any explanation — just PASS or FAIL.
+"""
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def load_cases() -> list[dict]:
-    with open(os.path.join(HERE, "eval_cases.json")) as f:
+    path = os.path.join(HERE, "eval_cases.json")
+    with open(path) as f:
         return json.load(f)["cases"]
 
 
-def judge(case: dict, answer: str) -> bool:
-    """Return True if `answer` passes for `case`.
+def get_judge_client() -> genai.Client:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not set — check your .env file.")
+    return genai.Client(api_key=api_key)
 
-    TODO: implement. A good default is LLM-as-judge — call a model with a
-    rubric like: "Given the question, the expected answer, and the actual
-    answer, reply PASS or FAIL." Return True on PASS.
+
+def judge(client: genai.Client, case: dict, answer: str) -> tuple[bool, str]:
+    """Call the judge model. Returns (passed: bool, verdict: str)."""
+    prompt = JUDGE_PROMPT_TEMPLATE.format(
+        input=case["input"],
+        expected=case["expected"],
+        answer=answer,
+    )
+    response = client.models.generate_content(
+        model=JUDGE_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.0,       # deterministic judge
+            max_output_tokens=64,  # only needs PASS or FAIL
+        ),
+    )
+    verdict = (response.text or "FAIL").strip().upper()
+    # model sometimes returns "PASS." or "PASS\n" — clean it
+    verdict = verdict.split()[0] if verdict else "FAIL"
+    passed = verdict == "PASS"
+    return passed, verdict
+
+
+# ── Variant runner ─────────────────────────────────────────────────────────────
+
+def run_variant(
+    label: str,
+    temperature: float,
+    cases: list[dict],
+    judge_client: genai.Client,
+    verbose: bool = True,
+) -> dict:
     """
-    raise NotImplementedError("TODO: implement the judge")
+    Run all cases through ChatService at the given temperature.
+    Returns a summary dict.
+    """
+    results = []
+    passed_count = 0
 
+    if verbose:
+        print(f"\n{'='*55}")
+        print(f"  Variant: {label}  (temperature={temperature})")
+        print(f"{'='*55}")
 
-def run_variant(label: str) -> None:
-    cases = load_cases()
-    service = ChatService()  # TODO: vary config per variant if comparing two
-    passed = 0
-    for case in cases:
-        service.reset()
-        answer = service.send(case["input"])
-        ok = judge(case, answer)
-        passed += int(ok)
-        print(f"  [{'PASS' if ok else 'FAIL'}] case {case['id']}")
+    for i, case in enumerate(cases):
+        # Fresh service per case — no history bleed between cases
+        service = ChatService(temperature=temperature)
+
+        # ── Get model answer ──────────────────────────────────────
+        try:
+            answer = service.send(case["input"])
+        except Exception as exc:
+            answer = f"[ERROR getting answer: {exc}]"
+
+        time.sleep(DELAY_BETWEEN_CALLS)
+
+        # ── Judge the answer ──────────────────────────────────────
+        try:
+            passed, verdict = judge(judge_client, case, answer)
+        except Exception as exc:
+            passed, verdict = False, f"JUDGE_ERROR: {exc}"
+
+        passed_count += int(passed)
+        results.append({
+            "id": case["id"],
+            "category": case.get("category", ""),
+            "passed": passed,
+            "verdict": verdict,
+            "answer_preview": answer[:120].replace("\n", " "),
+        })
+
+        if verbose:
+            status = "PASS" if passed else "FAIL"
+            print(f"  [{status}] case {case['id']:>2} ({case.get('category', '')})")
+            if not passed:
+                print(f"         preview: {answer[:100].replace(chr(10), ' ')}...")
+
+        # Delay before next case (skip after last case)
+        if i < len(cases) - 1:
+            time.sleep(DELAY_BETWEEN_CALLS)
+
     total = len(cases)
-    rate = (passed / total * 100) if total else 0
-    print(f"\n{label}: {passed}/{total} passed ({rate:.0f}%)")
+    rate = (passed_count / total * 100) if total else 0.0
+
+    if verbose:
+        print(f"\n  -> {passed_count}/{total} passed ({rate:.0f}%)\n")
+
+    return {
+        "label": label,
+        "temperature": temperature,
+        "passed": passed_count,
+        "total": total,
+        "pass_rate": rate,
+        "results": results,
+    }
+
+
+# ── Table printer ──────────────────────────────────────────────────────────────
+
+def print_summary_table(summaries: list[dict]) -> None:
+    print("\n" + "="*55)
+    print("  PASS-RATE SUMMARY")
+    print("="*55)
+    print(f"  {'Variant':<25} {'Temp':>5}  {'Passed':>8}  {'Rate':>7}")
+    print("  " + "-"*50)
+    for s in summaries:
+        print(
+            f"  {s['label']:<25} {s['temperature']:>5.1f}"
+            f"  {s['passed']:>2}/{s['total']:<5}  {s['pass_rate']:>5.0f}%"
+        )
+    print("="*55)
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run CodeLens eval")
+    parser.add_argument(
+        "--variant",
+        choices=["A", "B", "both"],
+        default="both",
+        help="Which variant(s) to run (default: both)",
+    )
+    args = parser.parse_args()
+
+    cases = load_cases()
+    judge_client = get_judge_client()
+
+    summaries = []
+
+    VARIANTS = {
+        "A": ("variant-A (temp=0.2)", 0.2),
+        "B": ("variant-B (temp=0.7)", 0.7),
+    }
+
+    to_run = ["A", "B"] if args.variant == "both" else [args.variant]
+
+    for vi, key in enumerate(to_run):
+        label, temp = VARIANTS[key]
+        summary = run_variant(label, temp, cases, judge_client, verbose=True)
+        summaries.append(summary)
+
+        # Pause between variants to reset the RPM window
+        if vi < len(to_run) - 1:
+            print(f"\n  Pausing {DELAY_BETWEEN_VARIANTS}s between variants...\n")
+            time.sleep(DELAY_BETWEEN_VARIANTS)
+
+    print_summary_table(summaries)
+    print("\nDone. Full results in eval/eval_results.md.\n")
 
 
 if __name__ == "__main__":
-    # TODO: run at least two variants (different prompt/model/settings) and
-    # paste the resulting pass-rate table into eval_results.md.
-    run_variant("variant-A")
+    main()
