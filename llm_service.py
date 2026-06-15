@@ -62,7 +62,7 @@ class ChatService:
     """Holds conversation state and talks to Gemini."""
 
     def __init__(self, model: str | None = None, temperature: float = 0.4) -> None:
-        self.model = model or os.environ.get("MODEL", "gemini-2.5-flash")
+        self.model = model or os.environ.get("MODEL", "gemini-3.1-flash-lite")
         self.temperature = temperature
         self.history: list[dict[str, str]] = []
         self.total_input_tokens = 0

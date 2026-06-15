@@ -1,22 +1,21 @@
 """
 Eval harness for CodeLens — AI Code Explainer.
 
-Uses LLM-as-judge (gemini-2.5-flash) to score each answer PASS/FAIL.
+Uses LLM-as-judge (gemini-3.1-flash-lite) to score each answer PASS/FAIL.
 Runs two variants:
   - variant-A: temperature=0.2  (more deterministic)
   - variant-B: temperature=0.7  (more creative)
 
 API-limit friendly design:
   - Each case gets ONE ChatService.send() call (the answer)
-  - Each answer gets ONE judge call  → 2 calls per case per variant
-  - Total API calls: 2 variants × 5 cases × 2 = 20 calls maximum
-  - 13-second delay between variants (RPM=5 → 1 req per 12s to be safe)
-  - 13-second delay between each call within a variant
+  - Each answer gets ONE judge call  -> 2 calls per case per variant
+  - Total API calls: 2 variants x 10 cases x 2 = 40 calls maximum
+  - RPM=15 -> 4s delay is safe (15 req/min = 1 req per 4s)
   - judge uses max_output_tokens=64 (tiny, fast, cheap)
 
 Run:
     python eval/run_eval.py
-    python eval/run_eval.py --variant A   # run only variant A (10 calls)
+    python eval/run_eval.py --variant A   # run only variant A (20 calls)
 """
 
 from __future__ import annotations
@@ -40,11 +39,11 @@ from llm_service import ChatService  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ── Judge config ───────────────────────────────────────────────────────────────
-JUDGE_MODEL = "gemini-2.5-flash"
+JUDGE_MODEL = "gemini-3.1-flash-lite"
 
-# RPM=5 means max 1 request every 12 seconds to be safe
-DELAY_BETWEEN_CALLS = 13  # seconds between every API call (answer + judge)
-DELAY_BETWEEN_VARIANTS = 60  # seconds pause between variant A and B
+# RPM=15 -> 1 request every 4s to be safe
+DELAY_BETWEEN_CALLS = 4   # seconds between every API call (answer + judge)
+DELAY_BETWEEN_VARIANTS = 30  # seconds pause between variant A and B
 
 JUDGE_PROMPT_TEMPLATE = """\
 You are a strict but fair evaluator for an AI code-explanation assistant called CodeLens.
@@ -137,8 +136,6 @@ def run_variant(
         except Exception as exc:
             answer = f"[ERROR getting answer: {exc}]"
 
-        if verbose:
-            print(f"  Waiting {DELAY_BETWEEN_CALLS}s before judge call…")
         time.sleep(DELAY_BETWEEN_CALLS)
 
         # ── Judge the answer ──────────────────────────────────────
@@ -160,12 +157,10 @@ def run_variant(
             status = "PASS" if passed else "FAIL"
             print(f"  [{status}] case {case['id']:>2} ({case.get('category', '')})")
             if not passed:
-                print(f"         preview: {answer[:100].replace(chr(10), ' ')}…")
+                print(f"         preview: {answer[:100].replace(chr(10), ' ')}...")
 
         # Delay before next case (skip after last case)
         if i < len(cases) - 1:
-            if verbose:
-                print(f"  Waiting {DELAY_BETWEEN_CALLS}s before next case…")
             time.sleep(DELAY_BETWEEN_CALLS)
 
     total = len(cases)
@@ -200,32 +195,6 @@ def print_summary_table(summaries: list[dict]) -> None:
     print("="*55)
 
 
-def print_markdown_table(summaries: list[dict]) -> None:
-    """Print a Markdown table suitable for pasting into eval_results.md."""
-    print("\n### Markdown table (paste into eval_results.md)\n")
-    print("| Variant | Temp | Cases | Passed | Pass rate |")
-    print("|---------|------|-------|--------|-----------|")
-    for s in summaries:
-        print(
-            f"| {s['label']} | {s['temperature']} "
-            f"| {s['total']} | {s['passed']} | {s['pass_rate']:.0f}% |"
-        )
-
-    print("\n#### Per-case breakdown\n")
-    if summaries:
-        first = summaries[0]
-        header = "| Case | Category | " + " | ".join(s["label"] for s in summaries) + " |"
-        sep = "|------|----------" + "|--------" * len(summaries) + "|"
-        print(header)
-        print(sep)
-        for i, r in enumerate(first["results"]):
-            row = f"| {r['id']} | {r['category']} |"
-            for s in summaries:
-                v = "PASS" if s["results"][i]["passed"] else "FAIL"
-                row += f" {v} |"
-            print(row)
-
-
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -257,13 +226,11 @@ def main() -> None:
 
         # Pause between variants to reset the RPM window
         if vi < len(to_run) - 1:
-            print(f"\n  Pausing {DELAY_BETWEEN_VARIANTS}s between variants to reset RPM window…\n")
+            print(f"\n  Pausing {DELAY_BETWEEN_VARIANTS}s between variants...\n")
             time.sleep(DELAY_BETWEEN_VARIANTS)
 
     print_summary_table(summaries)
-    print_markdown_table(summaries)
-
-    print("\nDone. Copy the Markdown table above into eval/eval_results.md.\n")
+    print("\nDone. Full results in eval/eval_results.md.\n")
 
 
 if __name__ == "__main__":

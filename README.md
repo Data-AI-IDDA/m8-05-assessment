@@ -39,23 +39,24 @@ streamlit run app.py
 ### 4. Run the eval (optional)
 
 ```bash
-python eval/run_eval.py          # both variants (~8 min)
-python eval/run_eval.py --variant A   # variant A only (~4 min)
+python eval/run_eval.py          # both variants (~3 min)
+python eval/run_eval.py --variant A   # variant A only (~1.5 min)
 ```
 
 ---
 
 ## Model choice
 
-**Model:** `gemini-2.5-flash` (Google AI free tier)
+**Model:** `gemini-3.1-flash-lite` (Google AI free tier)
 
-Gemini 2.5 Flash was chosen over local Ollama models because it requires no
-GPU, no local setup, and delivers ~1–2 s first-token latency on code
-explanation tasks. The free tier (RPM: 5, RPD: 20) is sufficient for a demo
-and eval workload. The cost/latency trade-off accepted: the RPD cap of 20
-means the full eval suite must be rate-limited (~8 minutes total), but for an
-assessment demo this is acceptable — zero infrastructure cost and no model
-download required.
+Gemini 3.1 Flash Lite was chosen over local Ollama models because it requires
+no GPU, no local setup, and delivers low-latency responses on code explanation
+tasks. Compared to `gemini-2.5-flash`, it offers a significantly higher free
+tier limit (RPM: 15, RPD: 500 vs RPM: 5, RPD: 20), making it far more
+practical for running evals and demos without hitting rate limits. The
+cost/latency trade-off accepted: slightly lower quality than Pro models, but
+for focused code explanation tasks the output quality is indistinguishable in
+practice.
 
 ---
 
@@ -63,15 +64,14 @@ download required.
 
 | Variant | Temp | Cases | Passed | Pass rate |
 |---------|------|-------|--------|-----------|
-| variant-A (temp=0.2) | 0.2 | 5 | 4 | 80% |
-| variant-B (temp=0.7) | 0.7 | 5 | 3 | 60% |
+| variant-A (temp=0.2) | 0.2 | 10 | 9 | 90% |
+| variant-B (temp=0.7) | 0.7 | 10 | 9 | 90% |
 
-Variant-A (temp=0.2) is the stronger setting at 80%; the single failure in
-both variants (case 5) revealed that the prompt-injection guard is overly
-aggressive — it blocks injection phrases inside code comments rather than
-passing them to the model, a known trade-off between safety and recall.
-Variant-B's extra failure was a transient 503 server error unrelated to code
-quality. Full details in [`eval/eval_results.md`](eval/eval_results.md).
+Both variants scored 90% (9/10); temperature had no measurable effect on
+correctness, and the single failure in both variants (case 10) revealed that
+the prompt-injection guard blocks injection phrases inside code comments — a
+known and documented trade-off between safety and recall. Full details in
+[`eval/eval_results.md`](eval/eval_results.md).
 
 ---
 
