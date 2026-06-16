@@ -29,31 +29,61 @@ def load_cases() -> list[dict]:
 
 
 def judge(case: dict, answer: str) -> bool:
-    """Return True if `answer` passes for `case`.
-
-    TODO: implement. A good default is LLM-as-judge — call a model with a
-    rubric like: "Given the question, the expected answer, and the actual
-    answer, reply PASS or FAIL." Return True on PASS.
-    """
-    raise NotImplementedError("TODO: implement the judge")
+    """Return True if `answer` contains any of our target validation keywords."""
+    expected_keywords = case.get("expected_keywords", [])
+    return any(keyword.lower() in answer.lower() for keyword in expected_keywords)
 
 
-def run_variant(label: str) -> None:
+def run_variant(label: str, temperature: float) -> dict[str, float]:
     cases = load_cases()
-    service = ChatService()  # TODO: vary config per variant if comparing two
+    service = ChatService(temperature=temperature)
+    
+    category_stats = {}
     passed = 0
+    
+    print(f"\n🚀 Running Evaluation Framework: {label} (Temp: {temperature})...")
+    
     for case in cases:
         service.reset()
+        category = case["category"]
+        
+        # Get response from microservice
         answer = service.send(case["input"])
         ok = judge(case, answer)
         passed += int(ok)
-        print(f"  [{'PASS' if ok else 'FAIL'}] case {case['id']}")
+        
+        # Initialize category counters
+        if category not in category_stats:
+            category_stats[category] = {"passed": 0, "total": 0}
+        category_stats[category]["total"] += 1
+        if ok:
+            category_stats[category]["passed"] += 1
+            
+        print(f"  [{'PASS' if ok else 'FAIL'}] Case #{case['id']} ({category})")
+        
     total = len(cases)
-    rate = (passed / total * 100) if total else 0
-    print(f"\n{label}: {passed}/{total} passed ({rate:.0f}%)")
+    overall_rate = (passed / total * 100) if total else 0
+    print(f"✨ {label} Summary: {passed}/{total} passed ({overall_rate:.1f}%)")
+    
+    # Flatten stats to return for comparison table construction
+    report = {cat: (stats["passed"] / stats["total"] * 100) for cat, stats in category_stats.items()}
+    report["OVERALL"] = overall_rate
+    return report
 
 
 if __name__ == "__main__":
-    # TODO: run at least two variants (different prompt/model/settings) and
-    # paste the resulting pass-rate table into eval_results.md.
-    run_variant("variant-A")
+    # Run two variants to evaluate performance differences across sampling parameters
+    results_a = run_variant("Variant-A (Strict Learning)", temperature=0.0)
+    results_b = run_variant("Variant-B (High Creativity)", temperature=1.2)
+    
+    # Format and display the final Markdown evaluation comparison table
+    print("\n### Evaluation Pass-Rate Comparison Table\n")
+    print("| Evaluation Category | Variant-A Pass Rate (Deterministic) | Variant-B Pass Rate (Creative) |")
+    print("| --- | --- | --- |")
+    for cat in ["Computer Vision", "LLMs", "Out of Scope", "Safety", "OVERALL"]:
+        rate_a = results_a.get(cat, 0.0)
+        rate_b = results_b.get(cat, 0.0)
+        if cat == "OVERALL":
+            print(f"| **{cat}** | **{rate_a:.1f}%** | **{rate_b:.1f}%** |")
+        else:
+            print(f"| {cat} | {rate_a:.1f}% | {rate_b:.1f}% |")
