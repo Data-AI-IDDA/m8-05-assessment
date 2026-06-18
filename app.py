@@ -1,65 +1,84 @@
 """
-Streamlit chat UI for the LLM chat micro-service.
+app.py — MealMate: a recipe & meal-planning Streamlit chat assistant.
 
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
-    streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
+Run with: streamlit run app.py
 """
 
 import streamlit as st
+from llm_service import ChatSession, MODEL_NAME
 
-from llm_service import ChatService
+st.set_page_config(page_title="MealMate", page_icon="🍳", layout="centered")
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
-
-# --- Sidebar control (Requirement: one small control) ----------------------
+# -----------------------------------------------------------------------
+# Sidebar controls
+# -----------------------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
-    temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
-        st.session_state.pop("service", None)
+    st.title("🍳 MealMate")
+    st.caption("Your recipe & meal-planning assistant")
+
+    temperature = st.slider(
+        "Creativity (temperature)",
+        min_value=0.0, max_value=1.0, value=0.7, step=0.1,
+        help="Lower = more predictable recipes, higher = more creative suggestions.",
+    )
+
+    if st.button("🗑️ Clear chat"):
+        st.session_state.pop("chat_session", None)
         st.session_state.pop("messages", None)
         st.rerun()
 
-# --- State -----------------------------------------------------------------
-if "service" not in st.session_state:
-    st.session_state.service = ChatService(temperature=temperature)
+    st.divider()
+    st.markdown(f"**Model:** `{MODEL_NAME}` (Ollama, local)")
+
+    if "chat_session" in st.session_state:
+        cs = st.session_state.chat_session
+        st.markdown("**Token usage (session total)**")
+        st.write(f"Input tokens: {cs.total_input_tokens}")
+        st.write(f"Output tokens: {cs.total_output_tokens}")
+
+# -----------------------------------------------------------------------
+# Session state init
+# -----------------------------------------------------------------------
+if "chat_session" not in st.session_state:
+    try:
+        st.session_state.chat_session = ChatSession(temperature=temperature)
+    except Exception as e:
+        st.error(
+            f"Could not start chat session: {e}\n\n"
+            "Make sure Ollama is running locally (`ollama serve`) and that "
+            f"the model `{MODEL_NAME}` has been pulled (`ollama pull {MODEL_NAME}`)."
+        )
+        st.stop()
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-service: ChatService = st.session_state.service
-service.temperature = temperature
+# -----------------------------------------------------------------------
+# Render history
+# -----------------------------------------------------------------------
+st.title("🍳 MealMate")
+st.caption("Ask for recipes, meal plans, or substitutions — tell me your dietary needs!")
 
-# --- Render history --------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# -----------------------------------------------------------------------
+# Chat input + streaming response
+# -----------------------------------------------------------------------
+if prompt := st.chat_input("e.g. 'Give me a vegetarian dinner for 2 under 30 minutes'"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
-        reply = st.write_stream(service.stream(prompt))
+        try:
+            response_text = st.write_stream(
+                st.session_state.chat_session.send_message_stream(prompt)
+            )
+        except Exception as e:
+            response_text = f"⚠️ Error talking to Ollama: {e}"
+            st.markdown(response_text)
 
-    st.session_state.messages.append({"role": "assistant", "content": reply})
-
-# --- Cost visibility (Requirement: token usage tracked) --------------------
-with st.sidebar:
-    st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    st.rerun()

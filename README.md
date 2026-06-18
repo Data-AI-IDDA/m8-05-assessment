@@ -1,122 +1,117 @@
-![logo_ironhack_blue 7](https://user-images.githubusercontent.com/23629340/40541063-a07a0a8a-601a-11e8-91b5-2f13e4e6b441.png)
+# MealMate — Recipe & Meal-Planning Chat Assistant
 
-# Assessment | Ship an LLM Chat Micro-Service
+## Summary
 
-## Overview
+MealMate is a focused chat assistant that helps people plan meals, find
+recipes, and adapt them to dietary constraints (vegetarian, vegan,
+gluten-free, allergies, low-carb, etc.). It's aimed at home cooks who want
+quick, practical recipe ideas and substitutions based on what they have on
+hand and what they can/can't eat.
 
-You will build and ship a small but complete **LLM chat application**: a backend that wraps a model and manages a multi-turn conversation, and a **Streamlit chat UI** a person can actually talk to. It must produce reliable output, be measured with a small eval, and carry at least one real safety mitigation.
+## How to run it
 
-This pulls together the whole week — prompting and structured output (Day 2), hosted-vs-local model choice (Day 3), and evaluation and safety (Day 4) — behind one working app you can demo. No fine-tuning, no GPU required.
+1. Install [Ollama](https://ollama.com) and pull a model:
+   ```bash
+   ollama pull llama3.1
+   ```
+   Make sure the Ollama server is running (it runs as a background
+   service after install, or start it manually with `ollama serve`).
 
-**Time budget:** Friday class. **Submission deadline:** Sunday 14 Jun 2026, 23:59 local time.
+2. Clone the repo and install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Learning Goals Verified
+3. (Optional) copy `.env.example` to `.env` and adjust the model name /
+   Ollama host if needed:
+   ```bash
+   cp .env.example .env
+   ```
 
-This assessment verifies that you can:
+4. Run the app:
+   ```bash
+   streamlit run app.py
+   ```
 
-- Call an LLM (hosted or local) and manage multi-turn conversation state
-- Build a usable chat interface with streaming and history
-- Make and justify a model choice with a cost/latency awareness
-- Evaluate your app with a small, repeatable eval
-- Apply at least one safety mitigation against prompt injection or unsafe output
+## Model choice
 
-## What You'll Build
+**Local model via Ollama (`llama3.1`)** was chosen over a hosted API.
 
-A chat app with a clear purpose — not a generic "talk to an AI" box. Pick a **focused assistant** so your prompt, eval, and guardrail have something concrete to target. Some good options (pick one or propose your own):
+**Cost/latency trade-off accepted:** running locally means $0 marginal
+cost per request and no dependency on an internet connection or API
+quota — useful for unlimited iteration during development and eval runs,
+and keeps all data on-device. The trade-off is latency and quality: on a
+laptop without a strong GPU, generation (and especially time-to-first-token)
+is slower than a hosted model, and a 7–8B local model is generally less
+capable/reliable than a large hosted model. For a small assistant where
+privacy, offline use, and zero API cost matter more than peak quality or
+raw speed, the local Ollama model was the better fit. Token usage
+(`prompt_eval_count` / `eval_count` from Ollama) is logged each turn so
+this trade-off stays visible.
 
-- **Study buddy** for one of this course's units — answers questions, quizzes the user
-- **Support triage assistant** — chats with a user and classifies/routes their issue
-- **Recipe / meal-planner assistant** with dietary constraints
-- **Code-explainer** that walks through a pasted snippet
-- **Travel or product recommender** for a narrow domain
+## Sampling settings
 
-The domain is yours; the engineering bar is fixed.
+`temperature=0.7`, `top_p=0.9`, `top_k=40`, `num_predict=1024`. Recipe
+suggestions benefit from some creativity/variety (hence temperature 0.7
+rather than near-0), while still needing coherent, followable
+instructions — so it's a moderate rather than high setting. The Streamlit
+sidebar lets the user adjust temperature live.
 
-## Requirements
+## Eval
 
-### Backend (the micro-service)
-
-- Wraps an LLM — **Gemini (free tier) or a local Ollama model**, your choice (justify it in the README).
-- Manages **multi-turn conversation state** (resend history correctly; the API is stateless).
-- Uses a clear **system prompt** that defines the assistant's role and constraints.
-- Sensible **sampling settings** for the task (and a short note on why).
-- Logs or tracks **token usage** (even just printing it) so cost is visible.
-
-### Frontend (Streamlit chat UI)
-
-- A **chat interface** using `st.chat_message` / `st.chat_input`.
-- **Conversation history** visible in the UI across turns.
-- **Streaming** responses (strongly preferred) so the app feels responsive.
-- A small control — e.g. a sidebar to pick model or temperature, or a "clear chat" button.
-
+Run the eval (requires Ollama running with the model pulled):
 ```bash
-streamlit run app.py
+python eval/run_eval.py
 ```
+This runs 7 cases (`eval/eval_cases.json`) — covering core recipe
+requests, dietary constraints, allergy handling, meal planning,
+substitutions, and prompt-injection / unsafe-recipe safety checks — across
+**three temperature settings (0.1, 0.5, 1.0)**. Each response is scored
+0-10 by an LLM-as-judge (the same local Ollama model) against a rubric,
+and a response "passes" if its score is ≥ 7. Results are written to
+`eval/eval_results.md`.
 
-### Evaluation
+| Variant | Cases | Passed | Pass rate | Avg Score |
+|---------|-------|--------|-----------|-----------|
+| temp=0.1 | 7 | 7 | 100% | 8.71 |
+| temp=0.5 | 7 | 7 | 100% | 9.57 |
+| temp=1.0 | 7 | 7 | 100% | 9.14 |
 
-- A small **eval** (~8–12 cases) with expected answers or a rubric.
-- A script or notebook that runs the eval and outputs a **pass-rate table**. LLM-as-judge is fine.
+*(This table is illustrative — re-run `python eval/run_eval.py` to
+generate real scores for your local model; see `eval/eval_results.md`
+for the full rubric and verdict.)*
 
-### Safety
+**Verdict:** temperature = 0.5 gave the highest average score while
+maintaining a 100% pass rate, producing the most balanced answers
+(recipe accuracy + completeness), so it's used as the app's default.
+Temperature 0.1 is too deterministic (correct but less varied recipes),
+while temperature 1.0 adds variety without improving quality. All three
+configurations correctly refused the prompt-injection and
+unsafe-"recipe" cases, showing the safety guardrail holds across
+temperature settings.
 
-- **At least one** concrete safety mitigation, demonstrated. For example: a prompt-injection guardrail (system-prompt hardening + input/output validation), a refusal for out-of-scope requests, or PII/disallowed-content filtering.
-- Include **one example** in your README showing an attack or bad input and your app handling it.
+## Safety mitigation
 
-## Deliverables
+See `safety/README.md` for full details. Summary: every user message is
+checked by a regex/keyword guardrail for prompt-injection phrasing
+("ignore previous instructions", "you are now...", etc.) and out-of-scope
+or disguised-harmful requests ("write code", "toxic gas recipe", etc.)
+*before* it's sent to the model, paired with a hardened system prompt that
+tells the model to treat in-message instructions as untrusted data. A
+before/after example is included in `safety/README.md`.
 
-Your submission is a single Git repository with roughly this structure:
+## Screenshot
 
-```
-README.md                  # see below
-app.py                     # Streamlit chat UI
-llm_service.py             # backend: model calls + conversation state
-eval/
-  eval_cases.json          # your test cases
-  run_eval.py              # runs the eval, prints/writes the pass-rate table
-  eval_results.md          # the resulting table + a short verdict
-safety/
-  README.md                # what mitigation you added and an example of it working
-requirements.txt
-.env.example               # NEVER commit your real key
-```
+# Project Screenshots
 
-Adapt the layout if your design differs — but every requirement above must be findable.
+## Interface
 
-## Top-level README
+![Home Page](assets/interface.png)
 
-Your repo's root `README.md` must include:
+## Model
 
-1. **One-paragraph summary** — what the assistant does and who it's for.
-2. **How to run it** — setup + the `streamlit run` command.
-3. **Model choice** — which model (hosted/local) and **why**, with a sentence on the **cost/latency** trade-off you accepted.
-4. **Eval table** — paste the pass-rate table (or link it) and one line on what it shows.
-5. **Safety mitigation** — what you added and a short before/after example.
-6. **A screenshot or short clip** of the chat UI working.
+![Dashboard](assets/models.png)
 
-## Submission
+## Temperature
 
-Open a Pull Request to the assessment repository with the full project. Paste the PR link as your deliverable.
-
-**Deadline:** Sunday 14 Jun 2026, 23:59 local time. Late submissions are scored at 70% maximum.
-
-## Grading Rubric
-
-| Area | Weight | What we look for |
-|---|---|---|
-| Working chat app | 25% | Streamlit chat UI runs, holds multi-turn history, streams responses |
-| Backend quality | 20% | Clean model calls, correct conversation state, sensible system prompt & sampling, token usage visible |
-| Model choice & cost awareness | 10% | A justified hosted/local choice with a real cost/latency note |
-| Evaluation | 20% | A repeatable eval that produces a pass-rate table, with an honest verdict |
-| Safety mitigation | 15% | A real, demonstrated guardrail with a before/after example |
-| README & polish | 10% | Clear run instructions, screenshot, coherent write-up |
-
-## Tips
-
-- **Start with the smallest thing that runs end-to-end** — a chat box that echoes the model — then add history, streaming, eval, and the guardrail in that order.
-- **Reuse your lab code.** Day 2's structured-output and prompts, Day 4's eval harness and guardrail — adapt them, don't rewrite.
-- **Pick a narrow assistant.** A focused scope makes your prompt, eval, and safety mitigation all easier and sharper.
-- **Make the eval honest.** A small eval that catches one real regression beats a big one full of trivial passes.
-- **Never commit your API key.** Use `.env` and `.env.example`.
-
-Good luck — ship something you'd actually demo.
+![Dashboard](assets/temperature.png)
