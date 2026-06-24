@@ -1,36 +1,26 @@
 """
-Streamlit chat UI for the LLM chat micro-service.
-
-STARTER skeleton. Run with:
-
-    pip install -r requirements.txt
-    streamlit run app.py
-
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
+Streamlit chat UI for the ML/MLOps Study Buddy.
+Run with:  streamlit run app.py
 """
 
 import streamlit as st
-
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="ML/MLOps Study Buddy", page_icon="🤖")
+st.title("🤖 ML/MLOps Study Buddy")
+st.caption("Ask me anything about deep learning, MLOps, Docker, LLMs, and the Ironhack curriculum.")
 
-# --- Sidebar control (Requirement: one small control) ----------------------
+# --- Sidebar -----------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
+    st.header("⚙️ Settings")
     temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
+    st.caption("Lower = more focused. Higher = more creative.")
+    if st.button("🗑️ Clear chat"):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
         st.rerun()
 
-# --- State -----------------------------------------------------------------
+# --- State -------------------------------------------------------------
 if "service" not in st.session_state:
     st.session_state.service = ChatService(temperature=temperature)
 if "messages" not in st.session_state:
@@ -39,27 +29,24 @@ if "messages" not in st.session_state:
 service: ChatService = st.session_state.service
 service.temperature = temperature
 
-# --- Render history --------------------------------------------------------
+# --- Render history ----------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# --- New user turn -----------------------------------------------------
+if prompt := st.chat_input("Ask a question about ML or MLOps…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
         reply = st.write_stream(service.stream(prompt))
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
+# --- Token usage in sidebar --------------------------------------------
 with st.sidebar:
-    st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+    st.divider()
+    st.caption(f"📊 Tokens in: {service.total_input_tokens}")
+    st.caption(f"📊 Tokens out: {service.total_output_tokens}")

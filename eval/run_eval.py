@@ -1,26 +1,27 @@
 """
-Run the eval over eval_cases.json and print a pass-rate table.
+Eval harness for the ML/MLOps Study Buddy.
+Judge: llama3.2:3b via Ollama (same model, local, no key needed).
 
-STARTER skeleton. Fill in the TODOs, then:
-
+Run with:
     python eval/run_eval.py
-
-Approach: send each case's input through your ChatService, then score the
-output. LLM-as-judge is fine — give a judge model a clear rubric and ask for
-a pass/fail (or 1–5). Keep the test set FIXED so you can compare changes.
 """
 
 from __future__ import annotations
+import json, os, sys
 
-import json
-import os
-import sys
-
-# Make the parent dir importable so we can reuse the backend.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from llm_service import ChatService  # noqa: E402
+from llm_service import ChatService
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+JUDGE_PROMPT = """You are a strict but fair evaluator.
+
+Question: {question}
+Expected answer (key points): {expected}
+Actual answer: {actual}
+
+Does the actual answer address the key points in the expected answer?
+Reply with exactly one word: PASS or FAIL."""
 
 
 def load_cases() -> list[dict]:
@@ -29,31 +30,55 @@ def load_cases() -> list[dict]:
 
 
 def judge(case: dict, answer: str) -> bool:
-    """Return True if `answer` passes for `case`.
+    """Use llama3.2:3b as the judge — returns True for PASS."""
+    judge_service = ChatService(temperature=0.0)
+    prompt = JUDGE_PROMPT.format(
+        question=case["input"],
+        expected=case["expected"],
+        actual=answer,
+    )
+    verdict = judge_service.send(prompt).strip().upper()
+    # Accept PASS even if model adds punctuation e.g. "PASS."
+    return verdict.startswith("PASS")
 
-    TODO: implement. A good default is LLM-as-judge — call a model with a
-    rubric like: "Given the question, the expected answer, and the actual
-    answer, reply PASS or FAIL." Return True on PASS.
-    """
-    raise NotImplementedError("TODO: implement the judge")
 
-
-def run_variant(label: str) -> None:
+def run_variant(label: str, temperature: float) -> tuple[int, int]:
     cases = load_cases()
-    service = ChatService()  # TODO: vary config per variant if comparing two
+    service = ChatService(temperature=temperature)
     passed = 0
+
+    print(f"\n{'='*50}")
+    print(f"Variant: {label}  (temperature={temperature})")
+    print(f"{'='*50}")
+
     for case in cases:
         service.reset()
         answer = service.send(case["input"])
         ok = judge(case, answer)
         passed += int(ok)
-        print(f"  [{'PASS' if ok else 'FAIL'}] case {case['id']}")
+        status = "PASS" if ok else "FAIL"
+        print(f"  [{status}] case {case['id']:>2} | {case['input'][:55]}...")
+
     total = len(cases)
     rate = (passed / total * 100) if total else 0
-    print(f"\n{label}: {passed}/{total} passed ({rate:.0f}%)")
+    print(f"\nResult: {passed}/{total} passed ({rate:.0f}%)")
+    return passed, total
 
 
 if __name__ == "__main__":
-    # TODO: run at least two variants (different prompt/model/settings) and
-    # paste the resulting pass-rate table into eval_results.md.
-    run_variant("variant-A")
+    results = []
+
+    p, t = run_variant("Variant-A  strict  (temp=0.2)", temperature=0.2)
+    results.append(("Variant-A (temp=0.2)", p, t))
+
+    p, t = run_variant("Variant-B  creative (temp=0.8)", temperature=0.8)
+    results.append(("Variant-B (temp=0.8)", p, t))
+
+    print("\n" + "="*50)
+    print("PASS-RATE TABLE")
+    print("="*50)
+    print(f"{'Variant':<30} {'Cases':>6} {'Passed':>7} {'Pass rate':>10}")
+    print("-"*55)
+    for label, passed, total in results:
+        rate = (passed / total * 100) if total else 0
+        print(f"{label:<30} {total:>6} {passed:>7} {rate:>9.0f}%")
