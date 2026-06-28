@@ -1,18 +1,12 @@
 """
-Streamlit chat UI for the LLM chat micro-service — "CourseAI Study Buddy".
-
-Run with:
+Streamlit UI for CourseAI Study Buddy.
 
     pip install -r requirements.txt
-    cp .env.example .env   # then add your GEMINI_API_KEY
+    cp .env.example .env   # add your GEMINI_API_KEY, or point at Ollama instead
     streamlit run app.py
 
-Satisfies the frontend requirements:
-  - chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (st.write_stream)
-  - sidebar controls: temperature slider + "Clear chat" button
-  - token usage shown so cost is visible
+Kept this file dumb on purpose — all the model/state/safety logic lives in
+llm_service.py, this just renders it and reads the sidebar controls.
 """
 
 import streamlit as st
@@ -23,7 +17,7 @@ st.set_page_config(page_title="CourseAI Study Buddy", page_icon="📚")
 st.title("📚 CourseAI Study Buddy")
 st.caption("Your tutor for the LLM-engineering week — prompting, model choice, evaluation & safety.")
 
-# --- Sidebar controls (Requirement: at least one small control) ------------
+# --- Sidebar: temperature + clear chat --------------------------------
 with st.sidebar:
     st.header("Settings")
     temperature = st.slider(
@@ -44,12 +38,12 @@ if "messages" not in st.session_state:
 service: ChatService = st.session_state.service
 service.temperature = temperature
 
-# --- Render history --------------------------------------------------------
+# --- Replay history on every rerun (Streamlit reruns the script top-to-bottom) ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
+# --- New turn ---------------------------------------------------------------
 if prompt := st.chat_input("Ask about prompting, model choice, eval, or safety…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -58,13 +52,13 @@ if prompt := st.chat_input("Ask about prompting, model choice, eval, or safety�
     with st.chat_message("assistant"):
         try:
             reply = st.write_stream(service.stream(prompt))
-        except Exception as e:  # surface config errors (e.g. missing API key) in-UI
+        except Exception as e:  # most likely a missing API key — show it, don't crash
             reply = f"⚠️ {e}"
             st.error(reply)
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
+# --- token counters live in the sidebar so cost is always visible ----------
 with st.sidebar:
     st.divider()
     st.subheader("Token usage")
