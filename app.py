@@ -1,31 +1,30 @@
 """
-Streamlit chat UI for the LLM chat micro-service.
-
-STARTER skeleton. Run with:
+Streamlit UI for CourseAI Study Buddy.
 
     pip install -r requirements.txt
+    cp .env.example .env   # add your GEMINI_API_KEY, or point at Ollama instead
     streamlit run app.py
 
-Requirements this file should satisfy (see README):
-  - a chat interface using st.chat_message / st.chat_input
-  - conversation history visible across turns
-  - streaming responses (strongly preferred)
-  - one small control (model / temperature picker, or "clear chat")
+Kept this file dumb on purpose — all the model/state/safety logic lives in
+llm_service.py, this just renders it and reads the sidebar controls.
 """
 
 import streamlit as st
 
 from llm_service import ChatService
 
-st.set_page_config(page_title="LLM Chat Micro-Service", page_icon="💬")
-st.title("💬 TODO: name your assistant")
+st.set_page_config(page_title="CourseAI Study Buddy", page_icon="📚")
+st.title("📚 CourseAI Study Buddy")
+st.caption("Your tutor for the LLM-engineering week — prompting, model choice, evaluation & safety.")
 
-# --- Sidebar control (Requirement: one small control) ----------------------
+# --- Sidebar: temperature + clear chat --------------------------------
 with st.sidebar:
     st.header("Settings")
-    temperature = st.slider("Temperature", 0.0, 1.5, 0.4, 0.1)
-    # TODO (optional): add a model picker (hosted vs local).
-    if st.button("Clear chat"):
+    temperature = st.slider(
+        "Temperature", 0.0, 1.5, 0.3, 0.1,
+        help="Low = focused & consistent (good for a study tutor). High = more varied.",
+    )
+    if st.button("🧹 Clear chat", use_container_width=True):
         st.session_state.pop("service", None)
         st.session_state.pop("messages", None)
         st.rerun()
@@ -39,27 +38,30 @@ if "messages" not in st.session_state:
 service: ChatService = st.session_state.service
 service.temperature = temperature
 
-# --- Render history --------------------------------------------------------
+# --- Replay history on every rerun (Streamlit reruns the script top-to-bottom) ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- Handle a new user turn ------------------------------------------------
-if prompt := st.chat_input("Type a message…"):
+# --- New turn ---------------------------------------------------------------
+if prompt := st.chat_input("Ask about prompting, model choice, eval, or safety…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Streaming: st.write_stream consumes a generator of text chunks.
-        # TODO: make ChatService.stream() actually stream from the model.
-        reply = st.write_stream(service.stream(prompt))
+        try:
+            reply = st.write_stream(service.stream(prompt))
+        except Exception as e:  # most likely a missing API key — show it, don't crash
+            reply = f"⚠️ {e}"
+            st.error(reply)
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# --- Cost visibility (Requirement: token usage tracked) --------------------
+# --- token counters live in the sidebar so cost is always visible ----------
 with st.sidebar:
-    st.caption(
-        f"Tokens — in: {service.total_input_tokens} / "
-        f"out: {service.total_output_tokens}"
-    )
+    st.divider()
+    st.subheader("Token usage")
+    st.metric("Input tokens", service.total_input_tokens)
+    st.metric("Output tokens", service.total_output_tokens)
+    st.caption(f"Backend: `{service.backend}` · model: `{service.model}`")
